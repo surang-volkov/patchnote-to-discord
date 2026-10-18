@@ -24,6 +24,9 @@ TAG_BOLD = re.compile(r"<b>(.*?)</b>", re.IGNORECASE | re.DOTALL)
 TAG_ANY = re.compile(r"<[^>]+>")
 MULTI_NEWLINE = re.compile(r"\n{3,}")
 
+FORUM_ERROR_CODE = 220001
+forum_urls: set[str] = set()  # 이미 포럼으로 확인된 URL은 처음부터 thread_name 포함
+
 
 def html_to_discord_text(html: str, link: str) -> str:
     text = html or ""
@@ -62,21 +65,47 @@ def build_embed(entry) -> dict:
         "color": COLOR,
     }
 
+def post_webhook(url: str, payload: dict) -> requests.Response:
+    resp = requests.post(url, json=payload, timeout=15)
+    if resp.status_code == 429:
+        retry_after = resp.json().get("retry_after", 1)
+        log.warning("Ratelimit, waited for %s seconds", retry_after)
+        time.sleep(float(retry_after) + 0.5)
+        resp = requests.post(url, json=payload, timeout=15)
+    return resp
+
+
+def is_forum_error(resp: requests.Response) -> bool:
+    if resp.status_code != 400:
+        return False
+    try:
+        return resp.json().get("code") == FORUM_ERROR_CODE
+    except ValueError:
+        return "thread_name" in resp.text
+
 
 def send_to_webhooks(webhooks: list[str], embed: dict) -> None:
-    payload = {"embeds": [embed]}
+    base_payload = {"embeds": [embed]}
+    thread_name = embed["title"][:100]
+
     for url in webhooks:
         url = url.strip()
         if not url:
             continue
-        resp = requests.post(url, json=payload, timeout=15)
-        if resp.status_code == 429:
-            retry_after = resp.json().get("retry_after", 1)
-            log.warning("Ratelimit, waited for %s seconds", retry_after)
-            time.sleep(float(retry_after) + 0.5)
-            resp = requests.post(url, json=payload, timeout=15)
+
+        payload = base_payload
+        if url in forum_urls:
+            payload = {**base_payload, "thread_name": thread_name}
+
+        resp = post_webhook(url, payload)
+
+        if is_forum_error(resp):
+            log.info("Forum channel detected, retrying with thread_name.")
+            forum_urls.add(url)
+            resp = post_webhook(url, {**base_payload, "thread_name": thread_name})
+
         if resp.status_code >= 300:
-            log.error("Failed to send webhooks.")
+            log.error("Failed to send webhooks: %s %s", resp.status_code, resp.text)
         else:
             log.info("Successful sending webhooks.")
         time.sleep(1)
