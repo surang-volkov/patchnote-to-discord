@@ -36,6 +36,8 @@ jobs:
           DEBUG: ${{ vars.DEBUG }}
           COLOR: ${{ vars.COLOR }}
           EMBED_DESC_LIMIT: ${{ vars.EMBED_DESC_LIMIT }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           LANGUAGE: ${{ vars.LANGUAGE }}
         run: python main.py
 
