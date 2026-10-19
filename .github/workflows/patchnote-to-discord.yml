@@ -9,6 +9,9 @@ on:
 jobs:
   check-and-notify:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write   # 오래된 캐시 삭제용
     steps:
       - uses: actions/checkout@v4
 
@@ -18,7 +21,8 @@ jobs:
 
       - run: pip install -r requirements.txt
 
-      - uses: actions/cache@v4
+      - name: Restore last guid
+        uses: actions/cache/restore@v4
         with:
           path: last_guid.txt
           key: last-guid-${{ github.run_id }}
@@ -31,5 +35,22 @@ jobs:
           STEAM_APPID: ${{ vars.STEAM_APPID }}
           DEBUG: ${{ vars.DEBUG }}
           COLOR: ${{ vars.COLOR }}
-          EMBED_DESC_LIMIT:  ${{ vars.EMBED_DESC_LIMIT }}
+          EMBED_DESC_LIMIT: ${{ vars.EMBED_DESC_LIMIT }}
+          LANGUAGE: ${{ vars.LANGUAGE }}
         run: python main.py
+
+      - name: Save last guid
+        if: hashFiles('last_guid.txt') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: last_guid.txt
+          key: last-guid-${{ github.run_id }}
+
+      - name: Delete old caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh cache list --key last-guid- --ref "${{ github.ref }}" \
+            --sort created_at --order desc --limit 100 --json id --jq '.[1:][].id' \
+            | xargs -r -n1 gh cache delete
